@@ -15,7 +15,9 @@ from .compiler import KernelCompiler
 from .particle import ParticleProcessor
 from .data_manager import RadiationDataManager
 
-src_path = "./kernels/"
+# src_path = "./kernels/"
+from fourier_radiator import __path__ as src_path
+src_path = src_path[0] + '/kernels/'
 
 class FourierRadiator:
     def __init__(self, Args):
