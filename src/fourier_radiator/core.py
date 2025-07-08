@@ -24,38 +24,64 @@ class FourierRadiator:
         self.queue = loader.get_queue()
         self.ctx = loader.get_context()
 
-    def compute_radiation(self, tracks, omega, theta, phi, dt, nSteps, itSnaps, nSnaps):
+    def compute_radiation(self, **kwargs):
         """
-        Compute the radiation spectrum.
-        :param tracks: Particle track data
-        :param omega: Angular frequency
-        :param theta: Angle theta
-        :param phi: Angle phi
-        :param dt: Time step
-        :param nSteps: Total steps
-        :param itSnaps: Snapshot time steps
-        :param nSnaps: Number of snapshots
-        :return: Radiation spectrum data
+        Compute the radiation spectrum using keyword arguments.
+
+        :param kwargs: A dictionary of parameters, including:
+            - tracks (list): Particle track data, where each element of the list should be a tuple containing:
+                - x (np.ndarray): x positions (array of shape (n_steps,))
+                - y (np.ndarray): y positions (array of shape (n_steps,))
+                - z (np.ndarray): z positions (array of shape (n_steps,))
+                - ux (np.ndarray): x-components of velocity (array of shape (n_steps,))
+                - uy (np.ndarray): y-components of velocity (array of shape (n_steps,))
+                - uz (np.ndarray): z-components of velocity (array of shape (n_steps,))
+                - wp (float): Weight of the particle
+                - id_start (int): Starting index of the particle's track
+
+            - omega (np.ndarray): Angular frequency values (array of shape (n_omega,))
+            - theta (np.ndarray): Polar angle values (array of shape (n_theta,))
+            - phi (np.ndarray): Azimuthal angle values (array of shape (n_phi,))
+            - dt (float): Time step for each iteration
+            - nSteps (int): Total number of simulation steps
+            - itSnaps (np.ndarray): Snapshot time steps (array of shape (n_snaps,))
+            - nSnaps (int): Number of snapshots to calculate
+
+        :return: Radiation spectrum (np.ndarray) of shape (n_snaps, n_theta, n_phi, n_omega)
         """
+        # Extract parameters from kwargs
+        tracks = kwargs.get("tracks")
+        omega = kwargs.get("omega")
+        theta = kwargs.get("theta")
+        phi = kwargs.get("phi")
+        dt = kwargs.get("dt")
+        nSteps = kwargs.get("nSteps")
+        itSnaps = kwargs.get("itSnaps")
+        nSnaps = kwargs.get("nSnaps")
+
+        # Additional processing here, similar to your original code...
         sinTheta = np.sin(theta, dtype=self.dtype)
         cosTheta = np.cos(theta, dtype=self.dtype)
         sinPhi = np.sin(phi, dtype=self.dtype)
         cosPhi = np.cos(phi, dtype=self.dtype)
         c = 299792458.0  # Speed of light in m/s
-        
+
         No = len(omega)
         Nt = len(theta)
         Np = len(phi)
         self.total_weight = 0.0
 
+        # Initialize spectrum array
         spectrum = np.zeros((nSnaps, Nt, Np, No), dtype=self.dtype)
 
+        # Compute radiation for each track
         for track in tqdm(tracks, desc="Calculating spectrum"):
             x, y, z, ux, uy, uz, wp, id_start = track
             ptItStart = id_start
             ptItEnd = ptItStart + len(x) - 1
             self.total_weight += wp
 
+            # Run the OpenCL kernel for this track
             spectrum = run_opencl_total_kernel(
                 self.ctx, self.queue, self.kernel,
                 spectrum, x, y, z, ux, uy, uz,
@@ -63,5 +89,5 @@ class FourierRadiator:
                 omega / c, sinTheta, cosTheta, sinPhi, cosPhi,
                 c * dt, nSnaps, itSnaps
             )
-        
+
         return norm_val(spectrum.swapaxes(-3, -1))

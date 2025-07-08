@@ -9,6 +9,9 @@ __pycache__/
 # tst file
 *.hkl
 
+# figure files
+*.png
+
 # Distribution / packaging
 .Python
 env/
