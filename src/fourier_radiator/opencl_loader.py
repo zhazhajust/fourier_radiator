@@ -1,18 +1,81 @@
 import numpy as np
 import pyopencl as cl
 from mako.template import Template
+try:
+    from mpi4py import MPI
+    mpi_installed = True
+except ImportError:
+    mpi_installed = False
 
 class OpenCLKernelLoader:
     def __init__(self, kernel_path, template_args, kernel_names=None, ctx=None):
+        if mpi_installed:
+            comm = MPI.COMM_WORLD
+            self.rank, self.size = comm.Get_rank(), comm.Get_size()
+        else:
+            self.rank, self.size = 0, 1
+
         self.kernel_path = kernel_path
         self.template_args = template_args
         self.kernel_names = kernel_names  # optional expected kernel names
-        self.ctx = ctx or cl.create_some_context()
+        # self.ctx = ctx or cl.create_some_context()
+        self.ctx = self._create_context(ctx)
         self.queue = cl.CommandQueue(self.ctx)
 
         self._build_program()
         self._extract_kernels()
 
+    def _create_context(self, ctx):
+        """
+        ctx:
+            1) 已经创建好的 cl.Context → 直接返回
+            2) 字符串 'gpu' / 'cpu'    → 按类型挑设备
+            3) None                    → 默认先找 GPU, 再退 CPU
+        """
+        # --- 1. 调用方直接给了 Context ---
+        if isinstance(ctx, cl.Context):
+            self.plat_name = "Manual"
+            return ctx
+
+        # --- 2. 决定想要的 device_type ---
+        if isinstance(ctx, str):
+            want = ctx.lower()
+            if want == "gpu":
+                dev_type = cl.device_type.GPU
+            elif want == "cpu":
+                dev_type = cl.device_type.CPU
+            else:
+                raise ValueError("ctx must be 'gpu', 'cpu', a cl.Context or None")
+        else:                       # ctx is None
+            dev_type = cl.device_type.GPU      # 默认先找 GPU
+            fallback = cl.device_type.CPU      # 找不到就用 CPU
+
+        try:
+            # --- 3. 枚举平台，按 rank 取设备 ---
+            for plat in cl.get_platforms():
+                devs = plat.get_devices(device_type=dev_type)
+                if devs:
+                    device = devs[self.rank % len(devs)]
+                    self.plat_name = plat.name
+                    return cl.Context([device])
+
+            # --- 4. 如果默认模式且 GPU 没找到，降级 CPU ---
+            if ctx is None and fallback:
+                for plat in cl.get_platforms():
+                    devs = plat.get_devices(device_type=fallback)
+                    if devs:
+                        device = devs[self.rank % len(devs)]
+                        self.plat_name = plat.name
+                        return cl.Context([device])
+
+            raise RuntimeError("No matching OpenCL device found")
+        
+        except Exception as e:
+            print(f"[OpenCL] context creation failed: {e}")
+            self.plat_name = "None"
+            # return None
+            raise RuntimeError("OpenCL plat_name None")
+            
     def _build_program(self):
         tpl = Template(filename=self.kernel_path)
         src = tpl.render(**self.template_args)
@@ -67,20 +130,21 @@ def run_opencl_total_kernel(ctx, queue, kernel,
     # 创建 buffers
     mf = cl.mem_flags
     bufs = {
-        "spectrum": cl.Buffer(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=spectrum_flat),
-        "x": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=x),
-        "y": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=y),
-        "z": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=z),
-        "ux": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=ux),
-        "uy": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=uy),
-        "uz": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=uz),
-        "omega": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=omega),  # 转换为弧度
+        "spectrum": cl.Buffer(ctx, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(spectrum_flat)),
+        "x": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(x)),
+        "y": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(y)),
+        "z": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(z)),
+        "ux": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(ux)),
+        "uy": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(uy)),
+        "uz": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(uz)),
+        "omega": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=omega * 2 * np.pi),  # 转换为弧度
         "sinTheta": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=sinTheta),
         "cosTheta": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cosTheta),
         "sinPhi": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=sinPhi),
         "cosPhi": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=cosPhi),
         "itSnaps": cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=itSnaps),
     }
+
 
     # 设置参数
     kernel.set_args(

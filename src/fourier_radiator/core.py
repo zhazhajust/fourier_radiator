@@ -19,7 +19,7 @@ class FourierRadiator:
             template_args={"my_dtype": dtype, "f_native": ""},
             kernel_names=["total"]
         )
-        self.dtype = np.float32 if dtype == "float" else np.float64
+        self.dtype = np.float32 if dtype == "float" else np.double
         self.kernel = loader.get_kernel("total")
         self.queue = loader.get_queue()
         self.ctx = loader.get_context()
@@ -55,9 +55,11 @@ class FourierRadiator:
         theta = kwargs.get("theta")
         phi = kwargs.get("phi")
         dt = kwargs.get("dt")
-        nSteps = kwargs.get("nSteps")
-        itSnaps = kwargs.get("itSnaps")
-        nSnaps = kwargs.get("nSnaps")
+        # nSteps = kwargs.get("nSteps")
+        # Default for itSnaps: range from 0 to nSteps - 1 if not provided
+        # itSnaps = kwargs.get("itSnaps", range(0, nSteps))
+        # Default for nSnaps: length of itSnaps if not provided
+        nSnaps = kwargs.get("nSnaps", 1)
 
         # Additional processing here, similar to your original code...
         sinTheta = np.sin(theta, dtype=self.dtype)
@@ -69,7 +71,7 @@ class FourierRadiator:
         No = len(omega)
         Nt = len(theta)
         Np = len(phi)
-        self.total_weight = 0.0
+        self.total_weight = self.dtype(0.0)
 
         # Initialize spectrum array
         spectrum = np.zeros((nSnaps, Nt, Np, No), dtype=self.dtype)
@@ -77,17 +79,20 @@ class FourierRadiator:
         # Compute radiation for each track
         for track in tqdm(tracks, desc="Calculating spectrum"):
             x, y, z, ux, uy, uz, wp, id_start = track
-            ptItStart = id_start
-            ptItEnd = ptItStart + len(x) - 1
+            
+            it_start = np.uint32(0)
+            it_range = (0, x.size)
+            snap_iterations = np.ascontiguousarray(np.linspace( *(it_range+(nSnaps+1, )), dtype=np.uint32)[1:])
+            
             self.total_weight += wp
 
             # Run the OpenCL kernel for this track
             spectrum = run_opencl_total_kernel(
-                self.ctx, self.queue, self.kernel,
-                spectrum, x, y, z, ux, uy, uz,
-                wp, ptItStart, ptItEnd, nSteps,
-                omega / c, sinTheta, cosTheta, sinPhi, cosPhi,
-                c * dt, nSnaps, itSnaps
+                self.ctx, self.queue, self.kernel, spectrum, 
+                x, y, z, ux, uy, uz,
+                wp, it_start, np.uint32(it_range[-1]), np.uint32(x.size),
+                omega, sinTheta, cosTheta, sinPhi, cosPhi,
+                c * dt, np.uint32(nSnaps), snap_iterations
             )
 
         return norm_val(spectrum.swapaxes(-3, -1))
