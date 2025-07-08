@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# tst file
+*.hkl
+
 # Distribution / packaging
 .Python
 env/

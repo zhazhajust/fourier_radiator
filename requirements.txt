@@ -1,0 +1,6 @@
+pyopencl
+numpy
+scipy
+mako
+tqdm
+pocl

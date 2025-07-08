@@ -1,15 +1,5 @@
-"""Top-level package for fourier_radiator."""
+from .core import FourierRadiator
+from .opencl_loader import OpenCLKernelLoader, run_opencl_total_kernel
+from .utils import norm_val
 
-__author__ = """Jie Cai"""
-__email__ = 'jiecai@stu.pku.edu.cn'
-__version__ = '0.1.0'
-
-from .main import FourierRadiator
-from .config import RadiationConfig
-from .opencl_env import OpenCLEnvironment
-from .compiler import KernelCompiler
-from .particle import ParticleProcessor
-from .data_manager import RadiationDataManager
-
-__all__ = ["FourierRadiator", "RadiationConfig", "OpenCLEnvironment",
-              "KernelCompiler", "ParticleProcessor", "RadiationDataManager"]
+__all__ = ["FourierRadiator", "OpenCLKernelLoader", "run_opencl_total_kernel", "norm_val"]
